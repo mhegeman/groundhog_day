@@ -1,0 +1,4 @@
+packages:
+  -shiny
+  -bsblib
+  -tidyverse
