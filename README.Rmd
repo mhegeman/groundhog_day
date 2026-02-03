@@ -16,6 +16,9 @@ knitr::opts_chunk$set(
 <!-- badges: start -->
 <!-- badges: end -->
 
+Shadow == more winter
+No shadow == early spring
+
 The goal of groundhog_day is to ...
 
 What is special about using `README.Rmd` instead of just `README.md`? You can include R chunks like so:

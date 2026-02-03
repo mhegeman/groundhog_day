@@ -4,8 +4,9 @@
 # groundhog_day
 
 <!-- badges: start -->
-
 <!-- badges: end -->
+
+Shadow == more winter No shadow == early spring
 
 The goal of groundhog_day is to …
 
