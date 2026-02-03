@@ -2,6 +2,13 @@ library(shiny)
 library(bslib)
 library(tidyverse)
 
+# Consistent color palette
+palette <- c(
+  "Early spring" = "#d73027",
+  "More winter" = "#4575b4",
+  "Uncertain" = "#ffffbf"
+)
+
 theme_set(
   theme_minimal(base_size = 12) +
     theme(
@@ -76,6 +83,7 @@ server <- function(input, output, session) {
       ggplot(aes(x = prediction, y = count, fill = prediction)) +
       geom_col() +
       geom_text(aes(label = count), color = "white", vjust = 1.5, size = 5) +
+      scale_fill_manual(values = palette) + # Apply consistent palette
       labs(x = "", y = "") +
       theme(legend.position = "none", axis.ticks = element_blank())
   })
@@ -99,6 +107,7 @@ server <- function(input, output, session) {
       ggplot(aes(x = prediction, y = count, fill = prediction)) +
       geom_col() +
       geom_text(aes(label = count), color = "white", vjust = 1.5, size = 5) +
+      scale_fill_manual(values = palette) + # Apply consistent palette
       labs(x = "", y = "", title = paste("Predictions for", input$groundhog)) +
       theme(legend.position = "none", axis.ticks = element_blank())
   })
