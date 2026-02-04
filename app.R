@@ -118,7 +118,7 @@ server <- function(input, output, session) {
           leafletOutput("groundhog_map", height = 500)
         )
       ),
-      "all_predictions" = layout_column_wrap(
+      "all_predictions" = layout_column_wrap(I
         width = 1/2,
         card(
           card_header("Number of Predictions Each Year"),
