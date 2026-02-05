@@ -1,5 +1,5 @@
 library(tidyverse)
-library(gt)
+# library(gt)
 
 groundhog_table <- read_csv("data/groundhog_day.csv") |>
   filter(year >= 1900)

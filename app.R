@@ -105,6 +105,11 @@ server <- function(input, output, session) {
           card_header("Filter by groundhog"),
           uiOutput("groundhog_selector"),
           plotOutput("count_plot_filtered")
+        ),
+        card(
+          card_header("Number of Predictions Each Year"),
+          # tableOutput("x"),
+          plotOutput("prediction_line_graph")
         )
       ),
       "all_groundhogs" = layout_column_wrap(
@@ -115,16 +120,12 @@ server <- function(input, output, session) {
           ),
         card(
           card_header("Map"),
-          leafletOutput("groundhog_map", height = 500)
+          # leafletOutput("groundhog_map", height = 500)
+          textOutput("Coming soon")
         )
       ),
-      "all_predictions" = layout_column_wrap(I
+      "all_predictions" = layout_column_wrap(
         width = 1/2,
-        card(
-          card_header("Number of Predictions Each Year"),
-          # tableOutput("x"),
-          plotOutput("prediction_line_graph")
-        ),
         card(
           card_header("Heat Map"),
           uiOutput("groundhog_selector_predictions"),
