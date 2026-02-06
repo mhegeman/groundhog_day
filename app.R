@@ -68,7 +68,9 @@ server <- function(input, output, session) {
         separate(coordinates,
                  into = c("latitude", "longitude"),
                  sep = ",",
-                 convert = TRUE)
+                 convert = TRUE) %>%
+        mutate(latitude = as.numeric(latitude),
+               longitude = as.numeric(longitude))
     } else {
       tibble()
     }
@@ -121,7 +123,7 @@ server <- function(input, output, session) {
           ),
         card(
           card_header("Map"),
-          # leafletOutput("groundhog_map", height = 500)
+          leafletOutput("groundhog_map", height = 500),
           textOutput("Coming soon")
         )
       ),
@@ -146,7 +148,9 @@ server <- function(input, output, session) {
   output$groundhog_map <- renderLeaflet({
     req(groundhogs())
 
-    d <- groundhogs()
+    d <- groundhogs() %>%
+      select(name, city, region, latitude, longitude) %>%
+      arrange(name)
 
     d %>%
       leaflet() %>%
@@ -154,7 +158,7 @@ server <- function(input, output, session) {
       addMarkers(
         lng = ~longitude,
         lat = ~latitude,
-        popup = ~paste0("<b>", names, "</b><br>", city, ", ", region)
+        popup = ~paste0("<b>", name, "</b><br>", city, ", ", region)
       )
   })
 
