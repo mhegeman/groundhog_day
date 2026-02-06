@@ -110,7 +110,7 @@ server <- function(input, output, session) {
           plotOutput("prediction_line_graph")
         ),
         card(
-          card_header("Filter by groundhog"),
+          card_header("Total preditions by groundhog"),
           uiOutput("groundhog_selector"),
           plotOutput("count_plot_filtered")
         ),
@@ -119,12 +119,12 @@ server <- function(input, output, session) {
         width = 1/2,
         card(
           card_header("List of all the groundhogs"),
-          tableOutput("groundhog_table")
+          DTOutput("groundhog_table")
           ),
         card(
           card_header("Map"),
           leafletOutput("groundhog_map", height = 500),
-          textOutput("Coming soon")
+          textOutput("debug_text")
         )
       ),
       "all_predictions" = layout_column_wrap(
@@ -139,10 +139,12 @@ server <- function(input, output, session) {
       )
   })
 
-  output$groundhog_table <- renderTable({
-    groundhogs() %>%
-      select(name, city, region, latitude, longitude) %>%
-      arrange(name)
+  output$groundhog_table <- renderDT({
+    datatable(groundhogs() %>%
+                select(name, city, region) %>%
+                # rename(Name = name, City = city, Region = region) %>%
+                arrange(name),
+              selection = 'single')
   })
 
   output$groundhog_map <- renderLeaflet({
@@ -155,11 +157,51 @@ server <- function(input, output, session) {
     d %>%
       leaflet() %>%
       addTiles() %>%
-      addMarkers(
+      setView(-98.5795, 39.8283, zoom = 4) %>%
+      addCircleMarkers(
         lng = ~longitude,
         lat = ~latitude,
+        layerId = seq_len(nrow(d)),
+        radius = 5,
+        color = "blue",
+        fillOpacity = 0.5,
         popup = ~paste0("<b>", name, "</b><br>", city, ", ", region)
       )
+  })
+
+  observeEvent(input$groundhog_table_row_selected, {
+    selected_row <- input$groundhog_table_rows_selected
+
+    print(paste("selected row: ", selected_row))
+
+    d <- groundhogs() %>%
+      select(name, city, region, latitude, longitude) %>%
+      arrange(name)
+
+    if (length(selected_row) > 0) {
+      #get coordinates of row
+      selected_data <- d[selected_row, ]
+
+      leafletProxy("groundhog_map") %>%
+        clearGroup("highlight") %>%
+        addCircleMarkers(
+          lng = selected_data$longitude,
+          lat = selected_data$latitude,
+          radius = 10,
+          color = "red",
+          fillOpacity = 0.8,
+          group = "highlight"
+        ) %>%
+        setView(
+          lng = selected_data$longitude,
+          lat = selected_data$latitude,
+          zoom = 10
+        )
+    }
+  })
+
+  output$debug_text <- renderText({
+    paste("Selected Row: ", input$groundhog_table_rows_selected )
   })
 
   output$prediction_table <- renderTable(predictions())
@@ -195,18 +237,6 @@ server <- function(input, output, session) {
   })
 
   # heatmap
-
-  output$x <- renderTable({
-    predictions() %>%
-      select(name, year, prediction) %>%
-      mutate(year = factor(year)) %>%
-      group_by(year) %>%
-      summarise(num_predictiosn = n())
-    # df %>%
-    #   group_by(year, predictions) %>%
-    #   summarise(x = n())
-
-  })
 
   output$prediction_line_graph <- renderPlot({
 
@@ -264,8 +294,7 @@ server <- function(input, output, session) {
       )
   })
 
-
-    output$heatmap_filtered_plot <- renderPlot({
+  output$heatmap_filtered_plot <- renderPlot({
 
       df <- filtered_predictions_heatmap()
       cols <- 10L
@@ -309,22 +338,6 @@ server <- function(input, output, session) {
 
     })
 
-
-
-  # Populate dropdown with groundhog names
-  # observe({
-  #   df <- predictions()
-  #   if (nrow(df) > 0) {
-  #     choices <- sort(unique(df$name))
-  #     updateSelectInput(
-  #       session,
-  #       "groundhog",
-  #       choices = choices,
-  #       selected = choices[1]
-  #     )
-  #   }
-  # })
-
   # Overall count plot
   output$count_plot <- renderPlot({
     df <- predictions()
@@ -364,7 +377,7 @@ server <- function(input, output, session) {
       geom_col() +
       geom_text(aes(label = count), color = "white", vjust = 1.5, size = 5) +
       scale_fill_manual(values = palette) + # Apply consistent palette
-      labs(x = "", y = "", title = paste("Predictions for", input$groundhog)) +
+      labs(x = "", y = "", title = paste("Predictions by ", input$groundhog)) +
       theme(legend.position = "none", axis.ticks = element_blank())
   })
 }
