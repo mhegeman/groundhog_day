@@ -6,9 +6,9 @@ library(scales)
 
 # Consistent color palette
 palette <- c(
-  "Early spring" = "#d73027",
+  "Early spring" = "#2E7D32",
   "More winter" = "#4575b4",
-  "Uncertain" = "#706E6D"
+  "Uncertain" = "lightgrey"
 )
 
 theme_set(
@@ -130,9 +130,12 @@ server <- function(input, output, session) {
       "all_predictions" = layout_column_wrap(
         width = 1/2,
         card(
+          card_header("Distribution of predictions by year"),
+          plotOutput("predictions_each_year")
+        ),
+        card(
           card_header("Heat Map"),
           uiOutput("groundhog_selector_predictions"),
-          # tableOutput("heatmap_filtered"),
           plotOutput("heatmap_filtered_plot")
         )
       )
@@ -273,27 +276,6 @@ server <- function(input, output, session) {
       filter(name == input$selected_groundhog_predictions)
   })
 
-  output$heatmap_filtered <- renderTable({
-
-    df <- filtered_predictions_heatmap()
-    cols <- 10L
-
-    df |>
-      distinct(year, shadow) |>
-      arrange(desc(year)) |>
-      mutate(
-        idx = seq_len(n()) - 1L,
-        col = (idx %% .env$cols) + 1L,
-        row = (idx %/% .env$cols) + 1L,
-        pred = case_when(
-          shadow == 1L ~ "More winter",
-          shadow == 0L ~ "Early spring",
-          TRUE ~ "Uncertain"
-        ),
-        text_color = if_else(pred == "Uncertain", "black", "white")
-      )
-  })
-
   output$heatmap_filtered_plot <- renderPlot({
 
       df <- filtered_predictions_heatmap()
@@ -337,6 +319,44 @@ server <- function(input, output, session) {
       )
 
     })
+
+  output$another_plot <- renderPlot({
+    df <- filtered_predictions_heatmap %>%
+      mutate(pred = case_when(
+        shadow == 1L ~ "More winter",
+        shadow == 0L ~ "Early spring",
+        TRUE ~ "Uncertain")
+        )
+
+
+  })
+
+  output$predictions_each_year <- renderPlot({
+    df <- predictions()
+    req(nrow(df) > 0)
+
+    df %>%
+      mutate(pred = case_when(
+        shadow == 1L ~ "More winter",
+        shadow == 0L ~ "Early spring",
+        TRUE ~ "Uncertain")
+      )%>%
+      count(year, pred) %>%
+      ggplot(aes(x = year, y = n, fill = pred)) +
+      geom_col(position = "fill") +
+      scale_y_continuous(labels = scales::percent_format()) +
+      scale_fill_manual(
+        values = c("Early spring" = "#2E7D32",
+                   "More winter" = "#4575b4",
+                   "Uncertain" = "lightgrey"),
+        name = "Prediction"
+      ) +
+      labs(
+        title = "Prediction Patterns Over Time",
+        x = "Year",
+        y = "Prediction"
+      )
+  })
 
   # Overall count plot
   output$count_plot <- renderPlot({
