@@ -100,17 +100,18 @@ server <- function(input, output, session) {
         width = 1/2,
         card(
           card_header("Total Groundhog Predictions"),
-          plotOutput("count_plot")),
-        card(
-          card_header("Filter by groundhog"),
-          uiOutput("groundhog_selector"),
-          plotOutput("count_plot_filtered")
+          plotOutput("count_plot")
         ),
         card(
           card_header("Number of Predictions Each Year"),
           # tableOutput("x"),
           plotOutput("prediction_line_graph")
-        )
+        ),
+        card(
+          card_header("Filter by groundhog"),
+          uiOutput("groundhog_selector"),
+          plotOutput("count_plot_filtered")
+        ),
       ),
       "all_groundhogs" = layout_column_wrap(
         width = 1/2,
@@ -307,18 +308,18 @@ server <- function(input, output, session) {
 
 
   # Populate dropdown with groundhog names
-  observe({
-    df <- predictions()
-    if (nrow(df) > 0) {
-      choices <- sort(unique(df$name))
-      updateSelectInput(
-        session,
-        "groundhog",
-        choices = choices,
-        selected = choices[1]
-      )
-    }
-  })
+  # observe({
+  #   df <- predictions()
+  #   if (nrow(df) > 0) {
+  #     choices <- sort(unique(df$name))
+  #     updateSelectInput(
+  #       session,
+  #       "groundhog",
+  #       choices = choices,
+  #       selected = choices[1]
+  #     )
+  #   }
+  # })
 
   # Overall count plot
   output$count_plot <- renderPlot({
