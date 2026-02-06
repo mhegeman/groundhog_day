@@ -3,6 +3,7 @@ library(bslib)
 library(tidyverse)
 library(leaflet)
 library(scales)
+library(DT)
 
 # Consistent color palette
 palette <- c(
@@ -22,25 +23,7 @@ theme_set(
     )
 )
 
-# ui <- page_sidebar(
-#   title = "Groundhog Day",
-#   sidebar = sidebar(
-#     p("Data provided by groundhog.org")
-#   ),
-#   card(
-#     card_header("How often is an early spring predicted vs. more winter?"),
-#     plotOutput("count_plot")
-#   ),
-#   card(
-#     card_header("Please choose a groundhog"),
-#     selectInput(
-#       "groundhog", # ADD: missing inputId
-#       "Select from this list:", # ADD: missing label
-#       choices = NULL
-#     ),
-#     plotOutput("count_plot_filtered")
-#   )
-# )
+
 
 ui <- page_sidebar(
   sidebar = sidebar(
@@ -108,23 +91,18 @@ server <- function(input, output, session) {
           card_header("Number of Predictions Each Year"),
           # tableOutput("x"),
           plotOutput("prediction_line_graph")
-        ),
-        card(
-          card_header("Total preditions by groundhog"),
-          uiOutput("groundhog_selector"),
-          plotOutput("count_plot_filtered")
-        ),
+        )
       ),
       "all_groundhogs" = layout_column_wrap(
         width = 1/2,
+        # card(
+        #   card_header("List of all the groundhogs"),
+        #   DTOutput("groundhog_table")
+        #   ),
         card(
-          card_header("List of all the groundhogs"),
-          DTOutput("groundhog_table")
-          ),
-        card(
-          card_header("Map"),
-          leafletOutput("groundhog_map", height = 500),
-          textOutput("debug_text")
+          card_header("Groundhogs of America"),
+          leafletOutput("groundhog_map", height = 500)
+          # textOutput("debug_text")
         )
       ),
       "all_predictions" = layout_column_wrap(
@@ -134,9 +112,10 @@ server <- function(input, output, session) {
           plotOutput("predictions_each_year")
         ),
         card(
-          card_header("Heat Map"),
+          card_header("Heat Map of Individual Groundhog Predictions"),
           uiOutput("groundhog_selector_predictions"),
-          plotOutput("heatmap_filtered_plot")
+          plotOutput("heatmap_filtered_plot", height = 300),
+          plotOutput("count_plot_filtered")
         )
       )
       )
@@ -299,7 +278,7 @@ server <- function(input, output, session) {
         geom_tile(width = 0.95, height = 0.95, color = NA) +
         geom_text(
           aes(label = year, color = text_color),
-          size = 3,
+          size = 5,
           show.legend = FALSE
       ) +
         scale_color_identity() +
@@ -343,8 +322,8 @@ server <- function(input, output, session) {
       )%>%
       count(year, pred) %>%
       ggplot(aes(x = year, y = n, fill = pred)) +
-      geom_col(position = "fill") +
-      scale_y_continuous(labels = scales::percent_format()) +
+      geom_col(position = "stack") +
+      # scale_y_continuous(labels = scales::percent_format()) +
       scale_fill_manual(
         values = c("Early spring" = "#2E7D32",
                    "More winter" = "#4575b4",
@@ -354,7 +333,7 @@ server <- function(input, output, session) {
       labs(
         title = "Prediction Patterns Over Time",
         x = "Year",
-        y = "Prediction"
+        y = "Predictions"
       )
   })
 
@@ -377,10 +356,10 @@ server <- function(input, output, session) {
 
   # Filtered predictions for selected groundhog
   filtered_predictions <- reactive({
-    req(input$selected_groundhog)
+    req(input$selected_groundhog_predictions)
     df <- predictions()
     req(nrow(df) > 0)
-    df %>% filter(name == input$selected_groundhog)
+    df %>% filter(name == input$selected_groundhog_predictions)
   })
 
 
@@ -397,7 +376,7 @@ server <- function(input, output, session) {
       geom_col() +
       geom_text(aes(label = count), color = "white", vjust = 1.5, size = 5) +
       scale_fill_manual(values = palette) + # Apply consistent palette
-      labs(x = "", y = "", title = paste("Predictions by ", input$groundhog)) +
+      labs(x = "", y = "", title = paste("Predictions by ", input$selected_groundhog_predictions)) +
       theme(legend.position = "none", axis.ticks = element_blank())
   })
 }
