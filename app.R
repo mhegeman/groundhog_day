@@ -1,16 +1,21 @@
-library(shiny)
-library(bslib)
-library(tidyverse)
-library(leaflet)
-library(scales)
+# ── Libraries ────────────────────────────────────────────────────────────────
+library(shiny)      # Core Shiny framework
+library(bslib)      # Bootstrap-based UI components (page_sidebar, card, etc.)
+library(tidyverse)  # Data manipulation (dplyr, ggplot2, tidyr, readr, etc.)
+library(leaflet)    # Interactive maps
+library(scales)     # Axis/label formatting helpers for ggplot2
 
-# Consistent color palette
+# ── Global: color palette ─────────────────────────────────────────────────────
+# Named vector maps each prediction category to a hex color.
+# Used consistently across all plots so colors never diverge.
 palette <- c(
   "Early spring" = "#d73027",
   "More winter" = "#4575b4",
   "Uncertain" = "#706E6D"
 )
 
+# ── Global: ggplot2 theme ─────────────────────────────────────────────────────
+# Sets a clean minimal theme as the default for every ggplot in the app.
 theme_set(
   theme_minimal(base_size = 12) +
     theme(
@@ -21,6 +26,11 @@ theme_set(
       panel.grid.minor = element_blank()
     )
 )
+
+# ── UI ────────────────────────────────────────────────────────────────────────
+# The UI uses a sidebar layout (bslib::page_sidebar).
+# The sidebar contains navigation buttons; the main area is rendered
+# dynamically by the server depending on which button was clicked.
 
 # ui <- page_sidebar(
 #   title = "Groundhog Day",
@@ -45,15 +55,23 @@ theme_set(
 ui <- page_sidebar(
   sidebar = sidebar(
     h4("Groundhog Day"),
+    # Each button sets the active "view" in the server via reactiveVal
     actionButton("overview", "Overview", class = "btn-primary w-100 mb-2"),
     actionButton("groundhog_view", "Groundhogs", class = "btn-primary w-100 mb-2"),
     actionButton("weather_predictions", "Predictions", class = "btn-primary w-100 mb-2")
   ),
+  # The entire main area is replaced by server-rendered UI on each view switch
   uiOutput("main_content")
 )
 
+# ── Server ────────────────────────────────────────────────────────────────────
 server <- function(input, output, session) {
-  # Load data
+
+  # ── Data loading ─────────────────────────────────────────────────────────
+  # Reactives read from CSV on first access and cache the result.
+  # Returning an empty tibble when files are absent prevents errors during
+  # development or before data is downloaded.
+
   predictions <- reactive({
     if (file.exists("data/predictions.csv")) {
       readr::read_csv("data/predictions.csv", show_col_types = FALSE)
@@ -64,6 +82,8 @@ server <- function(input, output, session) {
 
   groundhogs <- reactive({
     if (file.exists("data/all_groundhogs.csv")) {
+      # The coordinates column is a single "lat,lon" string; split it into
+      # two numeric columns so leaflet can use them directly.
       readr::read_csv("data/all_groundhogs.csv", show_col_types = FALSE) %>%
         separate(coordinates,
                  into = c("latitude", "longitude"),
@@ -74,12 +94,13 @@ server <- function(input, output, session) {
     }
   })
 
-
-
-  # Update current view when buttons are clicked
-
+  # ── Navigation state ──────────────────────────────────────────────────────
+  # A reactiveVal acts as a simple state machine for which view is displayed.
+  # Defaults to the overview ("default_view") on app start.
   current_view <- reactiveVal("default_view")
 
+  # Each sidebar button updates current_view, which triggers a re-render of
+  # main_content below.
   observeEvent(input$overview, {
     current_view("default_view")
   })
@@ -92,10 +113,14 @@ server <- function(input, output, session) {
     current_view("all_predictions")
   })
 
-  # Render different content based on current view
+  # ── Main content (dynamic layout) ─────────────────────────────────────────
+  # switch() maps the current view string to a bslib layout.
+  # Each layout uses layout_column_wrap to place two cards side by side.
   output$main_content <- renderUI({
     switch(
       current_view(),
+
+      # Overview: overall prediction counts + per-groundhog filter
       "default_view" = layout_column_wrap(
         width = 1/2,
         card(
@@ -103,10 +128,12 @@ server <- function(input, output, session) {
           plotOutput("count_plot")),
         card(
           card_header("Filter by groundhog"),
-          uiOutput("groundhog_selector"),
+          uiOutput("groundhog_selector"),      # Dropdown rendered by server
           plotOutput("count_plot_filtered")
         )
       ),
+
+      # Groundhogs: table of all groundhogs + interactive map
       "all_groundhogs" = layout_column_wrap(
         width = 1/2,
         card(
@@ -118,6 +145,8 @@ server <- function(input, output, session) {
           leafletOutput("groundhog_map", height = 500)
         )
       ),
+
+      # Predictions: line chart of annual counts + per-groundhog heat map
       "all_predictions" = layout_column_wrap(I
         width = 1/2,
         card(
@@ -127,7 +156,7 @@ server <- function(input, output, session) {
         ),
         card(
           card_header("Heat Map"),
-          uiOutput("groundhog_selector_predictions"),
+          uiOutput("groundhog_selector_predictions"),  # Dropdown for heat map
           # tableOutput("heatmap_filtered"),
           plotOutput("heatmap_filtered_plot")
         )
@@ -135,12 +164,16 @@ server <- function(input, output, session) {
       )
   })
 
+  # ── Groundhogs tab: table & map ───────────────────────────────────────────
+
+  # Simple sorted table of groundhog metadata
   output$groundhog_table <- renderTable({
     groundhogs() %>%
       select(name, city, region, latitude, longitude) %>%
       arrange(name)
   })
 
+  # Leaflet map with a marker for each groundhog; popup shows name and location
   output$groundhog_map <- renderLeaflet({
     req(groundhogs())
 
@@ -148,7 +181,7 @@ server <- function(input, output, session) {
 
     d %>%
       leaflet() %>%
-      addTiles() %>%
+      addTiles() %>%      # Default OpenStreetMap tile layer
       addMarkers(
         lng = ~longitude,
         lat = ~latitude,
@@ -156,8 +189,14 @@ server <- function(input, output, session) {
       )
   })
 
+  # (Unused) raw predictions table — kept for debugging
   output$prediction_table <- renderTable(predictions())
 
+  # ── Overview tab: dropdowns ───────────────────────────────────────────────
+  # These renderUI outputs build a selectInput after the predictions data has
+  # loaded, so choices reflect the actual data rather than hard-coded values.
+
+  # Dropdown for the overview tab's filtered bar chart
   output$groundhog_selector <- renderUI({
     req(predictions())
 
@@ -173,6 +212,7 @@ server <- function(input, output, session) {
     )
   })
 
+  # Separate dropdown for the predictions tab's heat map
   output$groundhog_selector_predictions <- renderUI({
     req(predictions())
 
@@ -188,8 +228,8 @@ server <- function(input, output, session) {
     )
   })
 
-  # heatmap
-
+  # ── Predictions tab: debug table (unused in UI) ───────────────────────────
+  # Counts predictions per year; currently commented out in the UI layout.
   output$x <- renderTable({
     predictions() %>%
       select(name, year, prediction) %>%
@@ -202,8 +242,12 @@ server <- function(input, output, session) {
 
   })
 
+  # ── Predictions tab: line chart ───────────────────────────────────────────
+  # Shows how the total number of participating groundhogs has changed over time.
+  # X-axis labels are shown only for every 10th year to avoid crowding.
   output$prediction_line_graph <- renderPlot({
 
+    # Build decade breaks starting from 2025 back to the earliest year in data
     yrs <- sort(unique(groundhog_table$year))
     decade_breaks <- as.character(seq(
       from = 2025,
@@ -222,12 +266,15 @@ server <- function(input, output, session) {
         geom_line() +
         labs(x = "Year",
              y = "Number of Groundhogs") +
+      # Only label the decade tick marks; all other years are unlabeled
       scale_x_discrete(
         breaks = decade_breaks,
         labels = decade_breaks
       )
   })
 
+  # ── Predictions tab: heat map reactive data ───────────────────────────────
+  # Filters predictions to the groundhog chosen in the predictions-tab dropdown.
   filtered_predictions_heatmap <- reactive({
     req(input$selected_groundhog_predictions)
 
@@ -237,15 +284,45 @@ server <- function(input, output, session) {
       filter(name == input$selected_groundhog_predictions)
   })
 
+  # (Unused) debug table for the heat map data transformation
   output$heatmap_filtered <- renderTable({
 
     df <- filtered_predictions_heatmap()
-    cols <- 10L
+    cols <- 10L   # Number of columns in the tile grid
 
     df |>
       distinct(year, shadow) |>
       arrange(desc(year)) |>
       mutate(
+        # Compute grid position: years fill left-to-right, top-to-bottom
+        idx = seq_len(n()) - 1L,
+        col = (idx %% .env$cols) + 1L,
+        row = (idx %/% .env$cols) + 1L,
+        # Convert binary shadow flag to human-readable prediction label
+        pred = case_when(
+          shadow == 1L ~ "More winter",
+          shadow == 0L ~ "Early spring",
+          TRUE ~ "Uncertain"
+        ),
+        # Use white text on colored tiles; black on the neutral grey
+        text_color = if_else(pred == "Uncertain", "black", "white")
+      )
+  })
+
+  # ── Predictions tab: heat map plot ────────────────────────────────────────
+  # Each tile represents one year for the selected groundhog.
+  # Tiles are arranged in a 10-column grid (most recent year first).
+  # Color encodes the prediction category; year label is drawn on the tile.
+  output$heatmap_filtered_plot <- renderPlot({
+
+    df <- filtered_predictions_heatmap()
+    cols <- 10L   # Number of tiles per row
+
+    df |>
+      distinct(year, shadow) |>
+      arrange(desc(year)) |>
+      mutate(
+        # Assign each year a (col, row) grid coordinate
         idx = seq_len(n()) - 1L,
         col = (idx %% .env$cols) + 1L,
         row = (idx %/% .env$cols) + 1L,
@@ -255,57 +332,36 @@ server <- function(input, output, session) {
           TRUE ~ "Uncertain"
         ),
         text_color = if_else(pred == "Uncertain", "black", "white")
+      ) %>%
+      ggplot(aes(x = col, y = row, fill = pred)) +
+      geom_tile(width = 0.95, height = 0.95, color = NA) +
+      # Year label centered on each tile; color adapts for readability
+      geom_text(
+        aes(label = year, color = text_color),
+        size = 3,
+        show.legend = FALSE
+      ) +
+      scale_color_identity() +                           # Use text_color as-is
+      scale_fill_manual(values = palette, guide = "none") +
+      scale_x_continuous(expand = c(0, 0), breaks = NULL) +
+      scale_y_reverse(expand = c(0, 0), breaks = NULL) + # Row 1 at the top
+      labs(
+        title = "Annual Groundhog Day Predictions",
+        x = NULL,
+        y = NULL
+      ) +
+      theme_minimal() +
+      theme(
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank()
       )
+
   })
 
-
-    output$heatmap_filtered_plot <- renderPlot({
-
-      df <- filtered_predictions_heatmap()
-      cols <- 10L
-
-      df |>
-        distinct(year, shadow) |>
-        arrange(desc(year)) |>
-        mutate(
-          idx = seq_len(n()) - 1L,
-          col = (idx %% .env$cols) + 1L,
-          row = (idx %/% .env$cols) + 1L,
-          pred = case_when(
-            shadow == 1L ~ "More winter",
-            shadow == 0L ~ "Early spring",
-            TRUE ~ "Uncertain"
-          ),
-          text_color = if_else(pred == "Uncertain", "black", "white")
-        ) %>%
-        ggplot(aes(x = col, y = row, fill = pred)) +
-        geom_tile(width = 0.95, height = 0.95, color = NA) +
-        geom_text(
-          aes(label = year, color = text_color),
-          size = 3,
-          show.legend = FALSE
-      ) +
-        scale_color_identity() +
-        scale_fill_manual(values = palette, guide = "none") +
-        scale_x_continuous(expand = c(0, 0), breaks = NULL) +
-        scale_y_reverse(expand = c(0, 0), breaks = NULL) +
-        labs(
-          title = "Annual Groundhog Day Predictions",
-          x = NULL,
-          y = NULL
-      ) +
-        theme_minimal() +
-        theme(
-          panel.grid = element_blank(),
-          axis.ticks = element_blank(),
-          axis.text = element_blank()
-      )
-
-    })
-
-
-
-  # Populate dropdown with groundhog names
+  # ── Legacy observer (from earlier UI version) ─────────────────────────────
+  # Kept in case the old selectInput with id "groundhog" is re-enabled.
+  # Populates its choices once prediction data is available.
   observe({
     df <- predictions()
     if (nrow(df) > 0) {
@@ -319,7 +375,9 @@ server <- function(input, output, session) {
     }
   })
 
-  # Overall count plot
+  # ── Overview tab: overall bar chart ──────────────────────────────────────
+  # Counts every prediction across all groundhogs and years, grouped by
+  # prediction category, and displays as a labeled bar chart.
   output$count_plot <- renderPlot({
     df <- predictions()
     req(nrow(df) > 0)
@@ -336,7 +394,8 @@ server <- function(input, output, session) {
             axis.text.y = element_blank())
   })
 
-  # Filtered predictions for selected groundhog
+  # ── Overview tab: per-groundhog filtered reactive ─────────────────────────
+  # Filters predictions to only the groundhog selected in the overview dropdown.
   filtered_predictions <- reactive({
     req(input$selected_groundhog)
     df <- predictions()
@@ -344,9 +403,8 @@ server <- function(input, output, session) {
     df %>% filter(name == input$selected_groundhog)
   })
 
-
-
-  # Filtered count plot
+  # ── Overview tab: filtered bar chart ─────────────────────────────────────
+  # Same structure as count_plot but scoped to the selected groundhog.
   output$count_plot_filtered <- renderPlot({
     df <- filtered_predictions()
     req(nrow(df) > 0)
@@ -363,4 +421,5 @@ server <- function(input, output, session) {
   })
 }
 
+# ── Launch ────────────────────────────────────────────────────────────────────
 shinyApp(ui, server)
