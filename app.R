@@ -4,14 +4,16 @@ library(bslib)      # Bootstrap-based UI components (page_sidebar, card, etc.)
 library(tidyverse)  # Data manipulation (dplyr, ggplot2, tidyr, readr, etc.)
 library(leaflet)    # Interactive maps
 library(scales)     # Axis/label formatting helpers for ggplot2
+library(DT)
+
 
 # ── Global: color palette ─────────────────────────────────────────────────────
 # Named vector maps each prediction category to a hex color.
 # Used consistently across all plots so colors never diverge.
 palette <- c(
-  "Early spring" = "#d73027",
+  "Early spring" = "#2E7D32",
   "More winter" = "#4575b4",
-  "Uncertain" = "#706E6D"
+  "Uncertain" = "lightgrey"
 )
 
 # ── Global: ggplot2 theme ─────────────────────────────────────────────────────
@@ -31,26 +33,6 @@ theme_set(
 # The UI uses a sidebar layout (bslib::page_sidebar).
 # The sidebar contains navigation buttons; the main area is rendered
 # dynamically by the server depending on which button was clicked.
-
-# ui <- page_sidebar(
-#   title = "Groundhog Day",
-#   sidebar = sidebar(
-#     p("Data provided by groundhog.org")
-#   ),
-#   card(
-#     card_header("How often is an early spring predicted vs. more winter?"),
-#     plotOutput("count_plot")
-#   ),
-#   card(
-#     card_header("Please choose a groundhog"),
-#     selectInput(
-#       "groundhog", # ADD: missing inputId
-#       "Select from this list:", # ADD: missing label
-#       choices = NULL
-#     ),
-#     plotOutput("count_plot_filtered")
-#   )
-# )
 
 ui <- page_sidebar(
   sidebar = sidebar(
@@ -88,7 +70,9 @@ server <- function(input, output, session) {
         separate(coordinates,
                  into = c("latitude", "longitude"),
                  sep = ",",
-                 convert = TRUE)
+                 convert = TRUE) %>%
+        mutate(latitude = as.numeric(latitude),
+               longitude = as.numeric(longitude))
     } else {
       tibble()
     }
@@ -125,7 +109,8 @@ server <- function(input, output, session) {
         width = 1/2,
         card(
           card_header("Total Groundhog Predictions"),
-          plotOutput("count_plot")),
+          plotOutput("count_plot")
+        ),
         card(
           card_header("Filter by groundhog"),
           uiOutput("groundhog_selector"),      # Dropdown rendered by server
@@ -136,13 +121,14 @@ server <- function(input, output, session) {
       # Groundhogs: table of all groundhogs + interactive map
       "all_groundhogs" = layout_column_wrap(
         width = 1/2,
+        # card(
+        #   card_header("List of all the groundhogs"),
+        #   DTOutput("groundhog_table")
+        #   ),
         card(
-          card_header("List of all the groundhogs"),
-          tableOutput("groundhog_table")
-          ),
-        card(
-          card_header("Map"),
+          card_header("Groundhogs of America"),
           leafletOutput("groundhog_map", height = 500)
+          # textOutput("debug_text")
         )
       ),
 
@@ -150,9 +136,8 @@ server <- function(input, output, session) {
       "all_predictions" = layout_column_wrap(I
         width = 1/2,
         card(
-          card_header("Number of Predictions Each Year"),
-          # tableOutput("x"),
-          plotOutput("prediction_line_graph")
+          card_header("Distribution of predictions by year"),
+          plotOutput("predictions_each_year")
         ),
         card(
           card_header("Heat Map"),
@@ -177,7 +162,9 @@ server <- function(input, output, session) {
   output$groundhog_map <- renderLeaflet({
     req(groundhogs())
 
-    d <- groundhogs()
+    d <- groundhogs() %>%
+      select(name, city, region, latitude, longitude) %>%
+      arrange(name)
 
     d %>%
       leaflet() %>%
@@ -185,7 +172,11 @@ server <- function(input, output, session) {
       addMarkers(
         lng = ~longitude,
         lat = ~latitude,
-        popup = ~paste0("<b>", names, "</b><br>", city, ", ", region)
+        layerId = seq_len(nrow(d)),
+        radius = 5,
+        color = "blue",
+        fillOpacity = 0.5,
+        popup = ~paste0("<b>", name, "</b><br>", city, ", ", region)
       )
   })
 
@@ -364,15 +355,29 @@ server <- function(input, output, session) {
   # Populates its choices once prediction data is available.
   observe({
     df <- predictions()
-    if (nrow(df) > 0) {
-      choices <- sort(unique(df$name))
-      updateSelectInput(
-        session,
-        "groundhog",
-        choices = choices,
-        selected = choices[1]
+    req(nrow(df) > 0)
+
+    df %>%
+      mutate(pred = case_when(
+        shadow == 1L ~ "More winter",
+        shadow == 0L ~ "Early spring",
+        TRUE ~ "Uncertain")
+      )%>%
+      count(year, pred) %>%
+      ggplot(aes(x = year, y = n, fill = pred)) +
+      geom_col(position = "stack") +
+      # scale_y_continuous(labels = scales::percent_format()) +
+      scale_fill_manual(
+        values = c("Early spring" = "#2E7D32",
+                   "More winter" = "#4575b4",
+                   "Uncertain" = "lightgrey"),
+        name = "Prediction"
+      ) +
+      labs(
+        title = "Prediction Patterns Over Time",
+        x = "Year",
+        y = "Predictions"
       )
-    }
   })
 
   # ── Overview tab: overall bar chart ──────────────────────────────────────
@@ -397,10 +402,10 @@ server <- function(input, output, session) {
   # ── Overview tab: per-groundhog filtered reactive ─────────────────────────
   # Filters predictions to only the groundhog selected in the overview dropdown.
   filtered_predictions <- reactive({
-    req(input$selected_groundhog)
+    req(input$selected_groundhog_predictions)
     df <- predictions()
     req(nrow(df) > 0)
-    df %>% filter(name == input$selected_groundhog)
+    df %>% filter(name == input$selected_groundhog_predictions)
   })
 
   # ── Overview tab: filtered bar chart ─────────────────────────────────────
@@ -416,7 +421,7 @@ server <- function(input, output, session) {
       geom_col() +
       geom_text(aes(label = count), color = "white", vjust = 1.5, size = 5) +
       scale_fill_manual(values = palette) + # Apply consistent palette
-      labs(x = "", y = "", title = paste("Predictions for", input$groundhog)) +
+      labs(x = "", y = "", title = paste("Predictions by ", input$selected_groundhog_predictions)) +
       theme(legend.position = "none", axis.ticks = element_blank())
   })
 }
