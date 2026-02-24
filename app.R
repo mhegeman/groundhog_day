@@ -1,12 +1,15 @@
 library(shiny)
 library(bslib)
 library(tidyverse)
+library(leaflet)
+library(scales)
+library(DT)
 
 # Consistent color palette
 palette <- c(
-  "Early spring" = "#d73027",
+  "Early spring" = "#2E7D32",
   "More winter" = "#4575b4",
-  "Uncertain" = "#ffffbf"
+  "Uncertain" = "lightgrey"
 )
 
 theme_set(
@@ -20,28 +23,20 @@ theme_set(
     )
 )
 
+
+
 ui <- page_sidebar(
-  title = "Groundhog Day Predictions Since 1900",
   sidebar = sidebar(
-    p("There are 74 groundhogs predicting the weather across the US.")
+    h4("Groundhog Day"),
+    actionButton("overview", "Overview", class = "btn-primary w-100 mb-2"),
+    actionButton("groundhog_view", "Groundhogs", class = "btn-primary w-100 mb-2"),
+    actionButton("weather_predictions", "Predictions", class = "btn-primary w-100 mb-2")
   ),
-  card(
-    card_header("How often is an early spring predicted vs. more winter?"),
-    plotOutput("count_plot")
-  ),
-  card(
-    card_header("Please choose a groundhog"),
-    selectInput(
-      "groundhog", # ADD: missing inputId
-      "Select from this list:", # ADD: missing label
-      choices = NULL
-    ),
-    plotOutput("count_plot_filtered")
-  )
+  uiOutput("main_content")
 )
 
 server <- function(input, output, session) {
-  # Load predictions data
+  # Load data
   predictions <- reactive({
     if (file.exists("data/predictions.csv")) {
       readr::read_csv("data/predictions.csv", show_col_types = FALSE)
@@ -52,24 +47,294 @@ server <- function(input, output, session) {
 
   groundhogs <- reactive({
     if (file.exists("data/all_groundhogs.csv")) {
-      readr::read_csv("data/all_groundhogs.csv", show_col_types = FALSE)
+      readr::read_csv("data/all_groundhogs.csv", show_col_types = FALSE) %>%
+        separate(coordinates,
+                 into = c("latitude", "longitude"),
+                 sep = ",",
+                 convert = TRUE) %>%
+        mutate(latitude = as.numeric(latitude),
+               longitude = as.numeric(longitude))
     } else {
       tibble()
     }
   })
 
-  # Populate dropdown with groundhog names
-  observe({
-    df <- predictions()
-    if (nrow(df) > 0) {
-      choices <- sort(unique(df$name))
-      updateSelectInput(
-        session,
-        "groundhog",
-        choices = choices,
-        selected = choices[1]
+
+
+  # Update current view when buttons are clicked
+
+  current_view <- reactiveVal("default_view")
+
+  observeEvent(input$overview, {
+    current_view("default_view")
+  })
+
+  observeEvent(input$groundhog_view, {
+    current_view("all_groundhogs")
+  })
+
+  observeEvent(input$weather_predictions, {
+    current_view("all_predictions")
+  })
+
+  # Render different content based on current view
+  output$main_content <- renderUI({
+    switch(
+      current_view(),
+      "default_view" = layout_column_wrap(
+        width = 1/2,
+        card(
+          card_header("Total Groundhog Predictions"),
+          plotOutput("count_plot")
+        ),
+        card(
+          card_header("Number of Predictions Each Year"),
+          # tableOutput("x"),
+          plotOutput("prediction_line_graph")
+        )
+      ),
+      "all_groundhogs" = layout_column_wrap(
+        width = 1/2,
+        # card(
+        #   card_header("List of all the groundhogs"),
+        #   DTOutput("groundhog_table")
+        #   ),
+        card(
+          card_header("Groundhogs of America"),
+          leafletOutput("groundhog_map", height = 500)
+          # textOutput("debug_text")
+        )
+      ),
+      "all_predictions" = layout_column_wrap(
+        width = 1/2,
+        card(
+          card_header("Distribution of predictions by year"),
+          plotOutput("predictions_each_year")
+        ),
+        card(
+          card_header("Heat Map of Individual Groundhog Predictions"),
+          uiOutput("groundhog_selector_predictions"),
+          plotOutput("heatmap_filtered_plot", height = 300),
+          plotOutput("count_plot_filtered")
+        )
       )
+      )
+  })
+
+  output$groundhog_table <- renderDT({
+    datatable(groundhogs() %>%
+                select(name, city, region) %>%
+                # rename(Name = name, City = city, Region = region) %>%
+                arrange(name),
+              selection = 'single')
+  })
+
+  output$groundhog_map <- renderLeaflet({
+    req(groundhogs())
+
+    d <- groundhogs() %>%
+      select(name, city, region, latitude, longitude) %>%
+      arrange(name)
+
+    d %>%
+      leaflet() %>%
+      addTiles() %>%
+      setView(-98.5795, 39.8283, zoom = 4) %>%
+      addCircleMarkers(
+        lng = ~longitude,
+        lat = ~latitude,
+        layerId = seq_len(nrow(d)),
+        radius = 5,
+        color = "blue",
+        fillOpacity = 0.5,
+        popup = ~paste0("<b>", name, "</b><br>", city, ", ", region)
+      )
+  })
+
+  observeEvent(input$groundhog_table_row_selected, {
+    selected_row <- input$groundhog_table_rows_selected
+
+    print(paste("selected row: ", selected_row))
+
+    d <- groundhogs() %>%
+      select(name, city, region, latitude, longitude) %>%
+      arrange(name)
+
+    if (length(selected_row) > 0) {
+      #get coordinates of row
+      selected_data <- d[selected_row, ]
+
+      leafletProxy("groundhog_map") %>%
+        clearGroup("highlight") %>%
+        addCircleMarkers(
+          lng = selected_data$longitude,
+          lat = selected_data$latitude,
+          radius = 10,
+          color = "red",
+          fillOpacity = 0.8,
+          group = "highlight"
+        ) %>%
+        setView(
+          lng = selected_data$longitude,
+          lat = selected_data$latitude,
+          zoom = 10
+        )
     }
+  })
+
+  output$debug_text <- renderText({
+    paste("Selected Row: ", input$groundhog_table_rows_selected )
+  })
+
+  output$prediction_table <- renderTable(predictions())
+
+  output$groundhog_selector <- renderUI({
+    req(predictions())
+
+    unique_names <- predictions() %>%
+      pull(name) %>%
+      unique() %>%
+      sort()
+
+    selectInput(
+      "selected_groundhog",
+      "Choose a groundhog: ",
+      choices = unique_names
+    )
+  })
+
+  output$groundhog_selector_predictions <- renderUI({
+    req(predictions())
+
+    unique_names <- predictions() %>%
+      pull(name) %>%
+      unique() %>%
+      sort()
+
+    selectInput(
+      "selected_groundhog_predictions",
+      "Choose a groundhog: ",
+      choices = unique_names
+    )
+  })
+
+  # heatmap
+
+  output$prediction_line_graph <- renderPlot({
+
+    yrs <- sort(unique(groundhog_table$year))
+    decade_breaks <- as.character(seq(
+      from = 2025,
+      to = min(yrs, na.rm = TRUE),
+      by = -10
+    ))
+
+    predictions() %>%
+      select(name, year, prediction) %>%
+      mutate(year = factor(year)) %>%
+      group_by(year) %>%
+      summarise(num_predictions = n()) %>%
+      ungroup() %>%
+      arrange(year) %>%
+      ggplot(aes(x = year, y = num_predictions, group = 1)) +
+        geom_line() +
+        labs(x = "Year",
+             y = "Number of Groundhogs") +
+      scale_x_discrete(
+        breaks = decade_breaks,
+        labels = decade_breaks
+      )
+  })
+
+  filtered_predictions_heatmap <- reactive({
+    req(input$selected_groundhog_predictions)
+
+    df <- predictions()
+    req(nrow(df) > 0)
+    df %>%
+      filter(name == input$selected_groundhog_predictions)
+  })
+
+  output$heatmap_filtered_plot <- renderPlot({
+
+      df <- filtered_predictions_heatmap()
+      cols <- 10L
+
+      df |>
+        distinct(year, shadow) |>
+        arrange(desc(year)) |>
+        mutate(
+          idx = seq_len(n()) - 1L,
+          col = (idx %% .env$cols) + 1L,
+          row = (idx %/% .env$cols) + 1L,
+          pred = case_when(
+            shadow == 1L ~ "More winter",
+            shadow == 0L ~ "Early spring",
+            TRUE ~ "Uncertain"
+          ),
+          text_color = if_else(pred == "Uncertain", "black", "white")
+        ) %>%
+        ggplot(aes(x = col, y = row, fill = pred)) +
+        geom_tile(width = 0.95, height = 0.95, color = NA) +
+        geom_text(
+          aes(label = year, color = text_color),
+          size = 5,
+          show.legend = FALSE
+      ) +
+        scale_color_identity() +
+        scale_fill_manual(values = palette, guide = "none") +
+        scale_x_continuous(expand = c(0, 0), breaks = NULL) +
+        scale_y_reverse(expand = c(0, 0), breaks = NULL) +
+        labs(
+          title = "Annual Groundhog Day Predictions",
+          x = NULL,
+          y = NULL
+      ) +
+        theme_minimal() +
+        theme(
+          panel.grid = element_blank(),
+          axis.ticks = element_blank(),
+          axis.text = element_blank()
+      )
+
+    })
+
+  output$another_plot <- renderPlot({
+    df <- filtered_predictions_heatmap %>%
+      mutate(pred = case_when(
+        shadow == 1L ~ "More winter",
+        shadow == 0L ~ "Early spring",
+        TRUE ~ "Uncertain")
+        )
+
+
+  })
+
+  output$predictions_each_year <- renderPlot({
+    df <- predictions()
+    req(nrow(df) > 0)
+
+    df %>%
+      mutate(pred = case_when(
+        shadow == 1L ~ "More winter",
+        shadow == 0L ~ "Early spring",
+        TRUE ~ "Uncertain")
+      )%>%
+      count(year, pred) %>%
+      ggplot(aes(x = year, y = n, fill = pred)) +
+      geom_col(position = "stack") +
+      # scale_y_continuous(labels = scales::percent_format()) +
+      scale_fill_manual(
+        values = c("Early spring" = "#2E7D32",
+                   "More winter" = "#4575b4",
+                   "Uncertain" = "lightgrey"),
+        name = "Prediction"
+      ) +
+      labs(
+        title = "Prediction Patterns Over Time",
+        x = "Year",
+        y = "Predictions"
+      )
   })
 
   # Overall count plot
@@ -85,16 +350,19 @@ server <- function(input, output, session) {
       geom_text(aes(label = count), color = "white", vjust = 1.5, size = 5) +
       scale_fill_manual(values = palette) + # Apply consistent palette
       labs(x = "", y = "") +
-      theme(legend.position = "none", axis.ticks = element_blank())
+      theme(legend.position = "none", axis.ticks = element_blank(),
+            axis.text.y = element_blank())
   })
 
   # Filtered predictions for selected groundhog
   filtered_predictions <- reactive({
-    req(input$groundhog)
+    req(input$selected_groundhog_predictions)
     df <- predictions()
     req(nrow(df) > 0)
-    df %>% filter(name == input$groundhog)
+    df %>% filter(name == input$selected_groundhog_predictions)
   })
+
+
 
   # Filtered count plot
   output$count_plot_filtered <- renderPlot({
@@ -108,7 +376,7 @@ server <- function(input, output, session) {
       geom_col() +
       geom_text(aes(label = count), color = "white", vjust = 1.5, size = 5) +
       scale_fill_manual(values = palette) + # Apply consistent palette
-      labs(x = "", y = "", title = paste("Predictions for", input$groundhog)) +
+      labs(x = "", y = "", title = paste("Predictions by ", input$selected_groundhog_predictions)) +
       theme(legend.position = "none", axis.ticks = element_blank())
   })
 }
